@@ -7,20 +7,14 @@ import time
 import datetime
 import data_helpers
 from text_cnn import TextCNN
-from tensorflow.contrib import learn
-import csv
 
 # Parameters
 # ==================================================
 
-# Data Parameters
-tf.flags.DEFINE_string("positive_data_file", "./data/rt-polaritydata/rt-polarity.pos", "Data source for the positive data.")
-tf.flags.DEFINE_string("negative_data_file", "./data/rt-polaritydata/rt-polarity.neg", "Data source for the negative data.")
-
 # Eval Parameters
+tf.flags.DEFINE_string("test_data_path", "./data/test.txt", "Data path to evaluation")
 tf.flags.DEFINE_integer("batch_size", 64, "Batch Size (default: 64)")
 tf.flags.DEFINE_string("checkpoint_dir", "", "Checkpoint directory from training run")
-tf.flags.DEFINE_boolean("eval_train", False, "Evaluate on all training data")
 
 # Misc Parameters
 tf.flags.DEFINE_boolean("allow_soft_placement", True, "Allow device soft device placement")
@@ -34,18 +28,13 @@ for attr, value in sorted(FLAGS.__flags.items()):
     print("{}={}".format(attr.upper(), value))
 print("")
 
-# CHANGE THIS: Load data. Load your own data here
-if FLAGS.eval_train:
-    x_raw, y_test = data_helpers.load_data_and_labels(FLAGS.positive_data_file, FLAGS.negative_data_file)
-    y_test = np.argmax(y_test, axis=1)
-else:
-    x_raw = ["a masterpiece four years in the making", "everything is off."]
-    y_test = [1, 0]
-
-# Map data into vocabulary
-vocab_path = os.path.join(FLAGS.checkpoint_dir, "..", "vocab")
-vocab_processor = learn.preprocessing.VocabularyProcessor.restore(vocab_path)
-x_test = np.array(list(vocab_processor.transform(x_raw)))
+# Load data. Load your own data here
+print("Loading data...")
+x_test, y_test, vocabulary, vocabulary_inv, onehot_label, max_sequence_length = data_helpers.load_data( FLAGS.test_data_path, FLAGS.checkpoint_dir )
+y_test = np.argmax(y_test, axis=1)
+print("Labels: %d: %s" % ( len(onehot_label), ','.join( sorted(onehot_label.values()) ) ) )
+print("Vocabulary size: {:d}".format(len(vocabulary)))
+print("Test set size {:d}".format(len(y_test)))
 
 print("\nEvaluating...\n")
 
@@ -60,6 +49,8 @@ with graph.as_default():
     sess = tf.Session(config=session_conf)
     with sess.as_default():
         # Load the saved meta graph and restore variables
+        print "FLAGS.checkpoint_dir %s" % FLAGS.checkpoint_dir
+        print "checkpoint_file %s" % checkpoint_file
         saver = tf.train.import_meta_graph("{}.meta".format(checkpoint_file))
         saver.restore(sess, checkpoint_file)
 
@@ -72,7 +63,7 @@ with graph.as_default():
         predictions = graph.get_operation_by_name("output/predictions").outputs[0]
 
         # Generate batches for one epoch
-        batches = data_helpers.batch_iter(list(x_test), FLAGS.batch_size, 1, shuffle=False)
+        batches = data_helpers.batch_iter(x_test, FLAGS.batch_size, 1, shuffle=False)
 
         # Collect the predictions here
         all_predictions = []
@@ -81,15 +72,9 @@ with graph.as_default():
             batch_predictions = sess.run(predictions, {input_x: x_test_batch, dropout_keep_prob: 1.0})
             all_predictions = np.concatenate([all_predictions, batch_predictions])
 
-# Print accuracy if y_test is defined
-if y_test is not None:
-    correct_predictions = float(sum(all_predictions == y_test))
-    print("Total number of test examples: {}".format(len(y_test)))
-    print("Accuracy: {:g}".format(correct_predictions/float(len(y_test))))
-
-# Save the evaluation to a csv
-predictions_human_readable = np.column_stack((np.array(x_raw), all_predictions))
-out_path = os.path.join(FLAGS.checkpoint_dir, "..", "prediction.csv")
-print("Saving evaluation to {0}".format(out_path))
-with open(out_path, 'w') as f:
-    csv.writer(f).writerows(predictions_human_readable)
+# Print accuracy
+print "y_test: " + str(y_test)
+print "all_predictions: " + str(all_predictions)
+correct_predictions = float(sum(all_predictions == y_test))
+print("Total number of test examples: {}".format(len(y_test)))
+print("Accuracy: {:g}".format(correct_predictions/float(len(y_test))))
